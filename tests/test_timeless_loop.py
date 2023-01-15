@@ -3,7 +3,7 @@ import contextlib
 import io
 import random
 from asyncio import DefaultEventLoopPolicy, AbstractEventLoopPolicy
-from typing import Type
+from typing import Type, List, Tuple
 
 import pytest
 
@@ -14,7 +14,7 @@ random_state = random.getstate()
 random.setstate(random_state)
 
 
-async def _test_loop_times_and_order() -> list[tuple[float, str]]:
+async def _test_loop_times_and_order() -> List[Tuple[float, str]]:
     """Test that the loop time is always the same and that the order of execution is correct.
 
     Run through a series of interleaved async functions and generators, and check that the
@@ -143,10 +143,7 @@ async def _test_loop_times_and_order() -> list[tuple[float, str]]:
     ("loop_policy", "tolerance"),
     ((TimelessEventLoopPolicy, 0), (DefaultEventLoopPolicy, 0.2)),
 )
-def test_loop_times_and_order(
-    loop_policy: Type[AbstractEventLoopPolicy],
-    tolerance: float,
-) -> None:
+def test_loop_times_and_order(loop_policy: Type[AbstractEventLoopPolicy], tolerance: float) -> None:
     random.setstate(random_state)
 
     loop = loop_policy().new_event_loop()
@@ -197,11 +194,7 @@ def test_loop_times_and_order(
 
 
 @pytest.mark.parametrize("do_deadlock", [True, False])
-@pytest.mark.asyncio()
-@pytest.mark.skip(reason="Gotta setup proper fixtures for this")
-def test_deadlock_detection(
-    do_deadlock: bool,
-) -> None:
+def test_deadlock_detection(do_deadlock: bool) -> None:
     async def _test_deadlock() -> None:
         ev_a = asyncio.Event()
         ev_b = asyncio.Event()
@@ -221,9 +214,9 @@ def test_deadlock_detection(
 
     if do_deadlock:
         with pytest.raises(DeadlockError):
-            TimelessEventLoop().run_until_complete(_test_deadlock())
+            TimelessEventLoop(raise_on_deadlock=True).run_until_complete(_test_deadlock())
     else:
-        TimelessEventLoop().run_until_complete(_test_deadlock())
+        TimelessEventLoop(raise_on_deadlock=True).run_until_complete(_test_deadlock())
 
 
 # skip

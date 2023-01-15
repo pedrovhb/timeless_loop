@@ -1,18 +1,19 @@
 [tool.poetry]
 name = "timeless-loop"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["Pedro Batista <pedrovhb@gmail.com>"]
 readme = "README.md"
 packages = [{include = "timeless_loop"}]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.8"
 
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.2.0"
-pytest-asyncio = "^0.20.3"
+pyright = "^1.1.289"
+nicepyright = "^0.1.2"
 
 [build-system]
 requires = ["poetry-core"]

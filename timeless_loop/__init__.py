@@ -9,13 +9,11 @@ all day to run.
 from __future__ import annotations
 
 import asyncio
-import functools
 import heapq
 import time
-from asyncio import SelectorEventLoop, TimerHandle, tasks, AbstractEventLoop, coroutines
+from asyncio import SelectorEventLoop, TimerHandle
 from asyncio.log import logger
 from collections import deque
-from functools import singledispatchmethod
 from selectors import SelectSelector, SelectorKey
 from types import TracebackType
 from typing import *
@@ -23,19 +21,8 @@ from typing import *
 MAXIMUM_SELECT_TIMEOUT = 24 * 3600
 
 
-_P = ParamSpec("_P")
-_T = TypeVar("_T")
-
-
 class DeadlockError(Exception):
     """Raised when a deadlock is detected."""
-
-
-class TimelessTask(tasks.Task):
-    """A Task subclass with added instrumentation."""
-
-    def __init__(self, coro: Awaitable, *, loop: AbstractEventLoop) -> None:
-        super().__init__(coro, loop=loop)
 
 
 class TimelessEventLoop(SelectorEventLoop):
@@ -49,17 +36,10 @@ class TimelessEventLoop(SelectorEventLoop):
     _clock_resolution: float
     _stopping: bool
 
-    def __init__(self, raise_on_deadlock: bool = False, *args, **kwargs) -> None:
+    def __init__(self, raise_on_deadlock: bool, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._raise_on_deadlock = raise_on_deadlock
         self._time = 0
-        # asyncio.get_event_loop().set_task_factory(self._task_factory)
-
-    def _task_factory(self, loop: AbstractEventLoop, coro: Awaitable[Any]) -> asyncio.Task:
-        task = tasks.Task(loop, coro)
-        # if task._source_traceback:
-        #     del task._source_traceback[-1]
-        return task
 
     def time(self) -> float:
         return self._time
@@ -137,95 +117,43 @@ class TimelessEventLoop(SelectorEventLoop):
             # No ready callbacks this loop iteration; move time forward to next scheduled callback
             self._time = next(hd._when for hd in self._scheduled)  # type: ignore[member-access]
 
-        is_deadlock = not self._scheduled and not self._ready and not self._stopping
-        if is_deadlock and self._raise_on_deadlock:
-            # for task in asyncio.all_tasks(self):
-            #     task.print_stack()
-            tasks_str = "\n".join(str(t) for t in asyncio.all_tasks(self))
-            msg = f"Active tasks: {len(asyncio.all_tasks(self))}\n{tasks_str}"
-            raise DeadlockError(f"{msg}\n\nNo scheduled or ready callbacks while loop is running")
+        if self._raise_on_deadlock and not self._scheduled and not self._ready and not self._stopping:
+            raise DeadlockError("No scheduled or ready callbacks while loop is running")
 
         handle = None  # Needed to break cycles when an exception occurs.
 
 
-class TimelessEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
-    def __init__(self, raise_on_deadlock: bool = False, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._raise_on_deadlock = raise_on_deadlock
+class TimelessEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
 
+    def __init__(self, raise_on_deadlock: bool=True) -> None:
+        self._raise_on_deadlock = raise_on_deadlock
+        self._loop: Optional[TimelessEventLoop] = None
+
+    # def get_event_loop(self) -> TimelessEventLoop:
+        # loop = super().get_event_loop()
+        # if not isinstance(loop, TimelessEventLoop):
+            # loop = TimelessEventLoop(raise_on_deadlock=self._raise_on_deadlock)
+            # asyncio.set_event_loop(loop)
+        # return loop
     def get_event_loop(self) -> TimelessEventLoop:
-        loop = super().get_event_loop()
-        if not isinstance(loop, TimelessEventLoop):
-            loop = TimelessEventLoop(self._raise_on_deadlock)
-            asyncio.set_event_loop(loop)
-        return loop
+        if not self._loop:
+            self.set_event_loop(self.new_event_loop())
+        return self._loop
+    
+    def set_event_loop(self, loop: TimelessEventLoop) -> None:
+      self._loop = loop
 
     def new_event_loop(self) -> TimelessEventLoop:
-        return TimelessEventLoop(self._raise_on_deadlock)
+        return TimelessEventLoop(raise_on_deadlock=self._raise_on_deadlock)
 
 
-class _UseTimelessEventLoop:
-    """Usable as a context manager to temporarily use the TimelessEventLoop.
-
-    Can also be used to setup the TimelessEventLoopPolicy or restore the previous policy
-    with setup_timeless_event_loop_policy or restore_event_loop_policy.
-    """
-
-    __slots__ = ("_previous_policy", "_raise_on_deadlock")
-
-    def __init__(self, raise_on_deadlock: bool = True) -> None:
-        self._previous_policy = None
-        self._raise_on_deadlock = raise_on_deadlock
-
-    def setup_timeless_event_loop_policy(self, raise_on_deadlock: bool = True) -> None:
-        """Setup the TimelessEventLoopPolicy as the default policy."""
-        self._raise_on_deadlock = raise_on_deadlock
-        self._previous_policy = asyncio.get_event_loop_policy()
-        asyncio.set_event_loop_policy(TimelessEventLoopPolicy(self._raise_on_deadlock))
-
-    def restore_event_loop_policy(self) -> None:
-        """Restore the previous event loop policy."""
-        if self._previous_policy is None:
-            raise RuntimeError("Timeless event loop not active.")
-        asyncio.set_event_loop_policy(self._previous_policy)
-        self._previous_policy = None
-
-    __enter__ = setup_timeless_event_loop_policy
-
-    def __call__(self, enabled: bool = True, raise_on_deadlock: bool = True) -> None:
-        if enabled:
-            self.setup_timeless_event_loop_policy(raise_on_deadlock)
-        else:
-            self.restore_event_loop_policy()
-        return self
-
-    def decorate(self, func: Callable[_P, _T]) -> Callable[_P, _T]:
-        """Decorate a function to use the TimelessEventLoopPolicy."""
-        # todo - remember args specific to this decorated fn
-        @functools.wraps(func)
-        def wrapper(*__args: _P.args, **__kwargs: _P.kwargs) -> _T:
-            with self(enabled=True, raise_on_deadlock=self._raise_on_deadlock):
-                return func(*__args, **__kwargs)
-
-        return wrapper
-
-    def __exit__(
-        self,
-        exception_type: Type[BaseException] | None,
-        exception_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> bool:
-        self.restore_event_loop_policy()
-        return False
 
 
-use_timeless_event_loop = _UseTimelessEventLoop
 
 __all__ = (
     "DeadlockError",
     "TimelessEventLoop",
     "TimelessEventLoopPolicy",
-    "use_timeless_event_loop",
 )
 
 if __name__ == "__main__":
@@ -262,8 +190,8 @@ if __name__ == "__main__":
             task(6, 4),
         )
 
-    with use_timeless_event_loop:
-        asyncio.run(main())
+    asyncio.set_event_loop_policy(TimelessEventLoopPolicy(True))
+    asyncio.run(main())
 
     # Or:
     # use_timeless_event_loop()
