@@ -9,7 +9,6 @@ wall clock time, and shows that the event loop time is much faster.
 from __future__ import annotations
 
 import asyncio
-import math
 import time
 
 import timeless_loop

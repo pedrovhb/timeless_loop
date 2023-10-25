@@ -16,11 +16,9 @@ import types
 from asyncio import SelectorEventLoop, TimerHandle
 from asyncio.log import logger
 from collections import deque
-from contextlib import contextmanager
 from selectors import SelectSelector, SelectorKey
 from typing import (
     Optional,
-    ContextManager,
     List,
     Callable,
     Tuple,
@@ -174,13 +172,10 @@ class _TimelessContext(types.ModuleType):
         "TimelessEventLoop",
         "TimelessEventLoopPolicy",
         "timeless_event_loop_ctx",
-        # "__enter__",
-        # "__exit__",
     )
 
     TimelessEventLoop = TimelessEventLoop
     TimelessEventLoopPolicy = TimelessEventLoopPolicy
-    # timeless_event_loop_ctx = timeless_event_loop_ctx
 
     def __enter__(self):
         self._previous_policy = asyncio.get_event_loop_policy()
@@ -195,21 +190,3 @@ class _TimelessContext(types.ModuleType):
 # Replace the current module entry in sys.modules with an instance of the new type
 sys.modules[__name__] = _TimelessContext(__name__)
 timeless_event_loop_ctx = _TimelessContext
-
-__all__ = (
-    "TimelessEventLoop",
-    "TimelessEventLoopPolicy",
-    "timeless_event_loop_ctx",
-)
-
-if __name__ == "__main__":
-
-    async def main() -> None:
-        """A coroutine with intertwined operations to demonstrate the timeless event loop."""
-
-    with timeless_event_loop_ctx():
-        asyncio.run(main())
-
-    # Or:
-    # asyncio.set_event_loop_policy(TimelessEventLoopPolicy())
-    # asyncio.run(main())

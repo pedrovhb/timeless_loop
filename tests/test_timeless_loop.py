@@ -7,7 +7,7 @@ from typing import Type, List, Tuple
 
 import pytest
 
-from timeless_loop import TimelessEventLoop, TimelessEventLoopPolicy
+from timeless_loop import TimelessEventLoopPolicy
 
 random.seed(0)
 random_state = random.getstate()

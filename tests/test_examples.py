@@ -1,8 +1,8 @@
 import asyncio
 import math
 
-from examples.example_long_intertwined_coros import example_long_intertwined_coros
 import timeless_loop
+from examples.example_long_intertwined_coros import example_long_intertwined_coros
 
 
 def test_example_long_intertwined_coros() -> None:
