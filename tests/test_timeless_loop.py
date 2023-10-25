@@ -7,7 +7,7 @@ from typing import Type, List, Tuple
 
 import pytest
 
-from timeless_loop import DeadlockError, TimelessEventLoop, TimelessEventLoopPolicy
+from timeless_loop import TimelessEventLoop, TimelessEventLoopPolicy
 
 random.seed(0)
 random_state = random.getstate()
@@ -193,36 +193,9 @@ def test_loop_times_and_order(loop_policy: Type[AbstractEventLoopPolicy], tolera
         assert s1 == s2
 
 
-@pytest.mark.parametrize("do_deadlock", [True, False])
-def test_deadlock_detection(do_deadlock: bool) -> None:
-    async def _test_deadlock() -> None:
-        ev_a = asyncio.Event()
-        ev_b = asyncio.Event()
-
-        async def a():
-            await ev_a.wait()
-            ev_b.set()
-
-        async def b():
-            await ev_b.wait()
-            ev_a.set()
-
-        if not do_deadlock:
-            asyncio.get_event_loop().call_later(1, ev_a.set)
-
-        await asyncio.gather(a(), b())
-
-    if do_deadlock:
-        with pytest.raises(DeadlockError):
-            TimelessEventLoop(raise_on_deadlock=True).run_until_complete(_test_deadlock())
-    else:
-        TimelessEventLoop(raise_on_deadlock=True).run_until_complete(_test_deadlock())
-
-
 # skip
 @pytest.mark.skip(reason="Expected to fail, and non-deterministic")
 async def test_httpx():
-
     # This was mostly an exploration of how third-party libraries
     # would interact with the event loop. In the case of httpx,
     # there's a slight incompatibility - the anyio library under
