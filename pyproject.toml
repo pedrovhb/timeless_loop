@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "timeless-loop"
-version = "0.1.2"
+version = "0.2.0"
 description = ""
 authors = ["Pedro Batista <pedrovhb@gmail.com>"]
 readme = "README.md"
@@ -15,8 +15,21 @@ pytest = "^7.2.0"
 pyright = "^1.1.289"
 nicepyright = "^0.1.2"
 black = {extras = ["d"], version = "^23.10.1"}
+usort = "^1.0.7"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+
+
+[tool.pyright]
+verboseOutput = true
+typeCheckingMode = "strict"
+reportImportCycles = "error"
+reportPropertyTypeMismatch = "error"
+reportUnnecessaryTypeIgnoreComment = "warning"
+reportPrivateUsage = "none"

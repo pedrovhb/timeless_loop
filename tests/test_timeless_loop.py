@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import io
 import random
-from asyncio import DefaultEventLoopPolicy, AbstractEventLoopPolicy
-from typing import Type, List, Tuple
+from asyncio import AbstractEventLoopPolicy, DefaultEventLoopPolicy
+from typing import AsyncIterator, List, Tuple, Type
 
 import pytest
 
@@ -40,12 +42,12 @@ async def _test_loop_times_and_order() -> List[Tuple[float, str]]:
         output.append((t, message))
 
     @contextlib.asynccontextmanager
-    async def open_file(filename, mode):
+    async def open_file(filename: str, mode: str) -> AsyncIterator[io.StringIO]:
         record_output(f"Opening file {filename} with mode {mode}")
         f = io.StringIO()
         try:
             record_output("Yielding file")
-            await asyncio.sleep(random.uniform(0, 1))
+            await asyncio.sleep(random.uniform(0, 1) * 0.1)
             yield f
             record_output("Closing file")
         finally:
@@ -53,28 +55,28 @@ async def _test_loop_times_and_order() -> List[Tuple[float, str]]:
             f.close()
 
     # Async generator
-    async def generate_random_numbers(n):
+    async def generate_random_numbers(n: int) -> AsyncIterator[int]:
         record_output("Starting async generator")
         for i in range(n):
-            await asyncio.sleep(random.uniform(0, 1))
+            await asyncio.sleep(random.uniform(0, 1) * 0.1)
             record_output(f"Yielding random number {i}")
             await asyncio.sleep(0)
             yield random.randint(1, 10)
 
     # Async iterable
     class RandomNumberIterable:
-        def __init__(self, n):
+        def __init__(self, n: int) -> None:
             record_output(f"RandomNumberIterable.__init__")
             self.n = n
 
-        def __aiter__(self):
+        def __aiter__(self) -> RandomNumberIterable:
             record_output(f"RandomNumberIterable.__aiter__")
             return self
 
-        async def __anext__(self):
+        async def __anext__(self) -> int:
             if self.n > 0:
                 self.n -= 1
-                await asyncio.sleep(random.uniform(0, 1))
+                await asyncio.sleep(random.uniform(0, 1) * 0.1)
                 record_output(f"RandomNumberIterable.__anext__")
                 return random.randint(1, 10)
             else:
@@ -82,21 +84,21 @@ async def _test_loop_times_and_order() -> List[Tuple[float, str]]:
                 raise StopAsyncIteration
 
     # Coroutine 1
-    async def coroutine_1():
+    async def coroutine_1() -> None:
         record_output("Starting coroutine 1")
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.1)
         record_output("Finishing coroutine 1")
 
     # Coroutine 2
-    async def coroutine_2():
+    async def coroutine_2() -> None:
         record_output("Starting coroutine 2")
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.2)
         record_output("Finishing coroutine 2")
 
     # Coroutine 3
     async def coroutine_3():
         record_output("Starting coroutine 3")
-        await asyncio.sleep(3)
+        await asyncio.sleep(0.3)
         record_output("Finishing coroutine 3")
 
     event = asyncio.Event()
@@ -108,7 +110,7 @@ async def _test_loop_times_and_order() -> List[Tuple[float, str]]:
         record_output("Event set")
 
     ts = [asyncio.create_task(waiter()) for _ in range(3)]
-    asyncio.get_event_loop().call_later(4, event.set)
+    asyncio.get_event_loop().call_later(0.4, event.set)
 
     # Start coroutine 1 as a task
     task1 = asyncio.create_task(coroutine_1())
@@ -123,7 +125,7 @@ async def _test_loop_times_and_order() -> List[Tuple[float, str]]:
             f.write(str(num) + "\n")
 
     async for num in RandomNumberIterable(5):
-        await asyncio.sleep(random.uniform(0, 1))
+        await asyncio.sleep(random.uniform(0, 1) * 0.1)
         record_output(str(num))
 
     # Wait for coroutine 2 to finish
@@ -141,7 +143,8 @@ async def _test_loop_times_and_order() -> List[Tuple[float, str]]:
 
 @pytest.mark.parametrize(
     ("loop_policy", "tolerance"),
-    ((TimelessEventLoopPolicy, 0), (DefaultEventLoopPolicy, 0.2)),
+    # ((TimelessEventLoopPolicy, 0),),
+    ((TimelessEventLoopPolicy, 0), (DefaultEventLoopPolicy, 0.02)),
 )
 def test_loop_times_and_order(loop_policy: Type[AbstractEventLoopPolicy], tolerance: float) -> None:
     random.setstate(random_state)
@@ -150,50 +153,55 @@ def test_loop_times_and_order(loop_policy: Type[AbstractEventLoopPolicy], tolera
     output = loop.run_until_complete(_test_loop_times_and_order())
 
     expected_output = [
-        (0, "Opening file test.txt with mode w"),
-        (0, "Yielding file"),
-        (0, "Waiting for event"),
-        (0, "Waiting for event"),
-        (0, "Waiting for event"),
-        (0, "Starting coroutine 1"),
-        (0, "Starting coroutine 2"),
-        (0.8444218515250481, "Starting async generator"),
-        (1, "Finishing coroutine 1"),
-        (1.6023762544653506, "Yielding random number 0"),
-        (1.6428606326461281, "Yielding random number 1"),
-        (2, "Finishing coroutine 2"),
-        (2.1287883292089407, "Yielding random number 2"),
-        (3.096588324129112, "Yielding random number 3"),
-        (3.679970363584143, "Yielding random number 4"),
-        (3.679970363584143, "Closing file"),
-        (3.679970363584143, "Closing file test.txt"),
-        (3.679970363584143, "RandomNumberIterable.__init__"),
-        (3.679970363584143, "RandomNumberIterable.__aiter__"),
-        (4, "Event set"),
-        (4, "Event set"),
-        (4, "Event set"),
-        (4.184657219401533, "RandomNumberIterable.__anext__"),
-        (4.324403004368212, "5"),
-        (4.419233767845068, "RandomNumberIterable.__anext__"),
-        (5.406492968878081, "5"),
-        (5.939056602966608, "RandomNumberIterable.__anext__"),
-        (6.84122255340619, "10"),
-        (7.151370122725523, "RandomNumberIterable.__anext__"),
-        (8.050208410693516, "2"),
-        (8.734192342608956, "RandomNumberIterable.__anext__"),
-        (9.294006021623856, "8"),
-        (9.294006021623856, "RandomNumberIterable.__anext__ StopAsyncIteration"),
-        (9.294006021623856, "Starting coroutine 3"),
-        (12.294006021623856, "Finishing coroutine 3"),
+        (0.0, "Opening file test.txt with mode w"),
+        (0.0, "Yielding file"),
+        (0.0, "Waiting for event"),
+        (0.0, "Waiting for event"),
+        (0.0, "Waiting for event"),
+        (0.0, "Starting coroutine 1"),
+        (0.0, "Starting coroutine 2"),
+        (0.08444218515250482, "Starting async generator"),
+        (0.1, "Finishing coroutine 1"),
+        (0.16023762544653508, "Yielding random number 0"),
+        (0.16428606326461284, "Yielding random number 1"),
+        (0.2, "Finishing coroutine 2"),
+        (0.2128788329208941, "Yielding random number 2"),
+        (0.30965883241291126, "Yielding random number 3"),
+        (0.3679970363584144, "Yielding random number 4"),
+        (0.3679970363584144, "Closing file"),
+        (0.3679970363584144, "Closing file test.txt"),
+        (0.3679970363584144, "RandomNumberIterable.__init__"),
+        (0.3679970363584144, "RandomNumberIterable.__aiter__"),
+        (0.4, "Event set"),
+        (0.4, "Event set"),
+        (0.4, "Event set"),
+        (0.4184657219401534, "RandomNumberIterable.__anext__"),
+        (0.4324403004368213, "5"),
+        (0.4419233767845069, "RandomNumberIterable.__anext__"),
+        (0.5406492968878082, "5"),
+        (0.5939056602966609, "RandomNumberIterable.__anext__"),
+        (0.6841222553406192, "10"),
+        (0.7151370122725524, "RandomNumberIterable.__anext__"),
+        (0.8050208410693518, "2"),
+        (0.873419234260896, "RandomNumberIterable.__anext__"),
+        (0.929400602162386, "8"),
+        (0.929400602162386, "RandomNumberIterable.__anext__ StopAsyncIteration"),
+        (0.929400602162386, "Starting coroutine 3"),
+        (1.229400602162386, "Finishing coroutine 3"),
     ]
 
     assert len(output) == len(expected_output)
     for (t1, s1), (t2, s2) in zip(output, expected_output):
+        # print((t1 - t2, s1))
+        # Tolerance is necessary for the real time event loop, since there'll
+        # be some fluctuation in the time taken to execute each step.
+        # For the timeless loop, the time taken to execute each step should be
+        # deterministic and exactly the same across executions, so the tolerance
+        # is set to 0.
         assert abs(t1 - t2) <= tolerance
         assert s1 == s2
 
 
-# skip
 @pytest.mark.skip(reason="Expected to fail, and non-deterministic")
 async def test_httpx():
     # This was mostly an exploration of how third-party libraries
@@ -206,13 +214,15 @@ async def test_httpx():
     # This is a problem with the anyio library, not with the event loop; I'll be
     # submitting a (-1 character) PR. I think the authors of anyio should be fine
     # with it, since it'll have effectively no impact on real-world usage.
-    import httpx
 
-    client = httpx.AsyncClient()
-    response = await client.get("https://httpbin.org/get")
-    print(response.json())
-
-    tasks = [asyncio.create_task(client.get("https://httpbin.org/get")) for _ in range(5)]
-    responses = await asyncio.gather(*tasks)
-    for response in responses:
-        print(response.json())
+    # import httpx
+    #
+    # client = httpx.AsyncClient()
+    # response = await client.get("https://httpbin.org/get")
+    # print(response.json())
+    #
+    # tasks = [asyncio.create_task(client.get("https://httpbin.org/get")) for _ in range(5)]
+    # responses = await asyncio.gather(*tasks)
+    # for response in responses:
+    #     print(response.json())
+    pass  # Test commented out because annoying typing errors

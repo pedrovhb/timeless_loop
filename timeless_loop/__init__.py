@@ -10,26 +10,41 @@ from __future__ import annotations
 
 import asyncio
 import heapq
-import sys
+import selectors
 import time
-import types
-from asyncio import SelectorEventLoop, TimerHandle
+import typing
+from asyncio import AbstractEventLoop, SelectorEventLoop
 from asyncio.log import logger
 from collections import deque
-from selectors import SelectSelector, SelectorKey
-from typing import (
-    Optional,
-    List,
-    Callable,
-    Tuple,
-)
+from contextlib import contextmanager
+from selectors import SelectorKey, SelectSelector
+from typing import Callable, List, Optional, Tuple
 
 MAXIMUM_SELECT_TIMEOUT = 24 * 3600
 
 
+class _TimerHandleProtocol(typing.Protocol):
+    """Protocol class for typing validation.
+
+    Pyright doesn't look into internal attributes for the TimerHandle
+    class. We shouldn't either, but the standard library asyncio loop
+    implementation does, and we're copying that, so ¯\\(ツ)/¯
+    """
+
+    _cancelled: bool
+    _scheduled: bool
+    _when: float
+
+    def when(self) -> float:
+        ...
+
+    def _run(self) -> None:
+        ...
+
+
 class TimelessEventLoop(SelectorEventLoop):
-    _scheduled: list[TimerHandle]
-    _ready: deque[TimerHandle]
+    _scheduled: list[_TimerHandleProtocol]
+    _ready: deque[_TimerHandleProtocol]
     _selector: SelectSelector
     _process_events: Callable[[List[Tuple[SelectorKey, int]]], None]
     _timer_cancelled_count: int
@@ -37,9 +52,9 @@ class TimelessEventLoop(SelectorEventLoop):
     _clock_resolution: float
     _stopping: bool
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._time = 0
+    def __init__(self, selector: selectors.BaseSelector | None = None) -> None:
+        super().__init__(selector=selector)
+        self._time: float = 0.0
 
     def time(self) -> float:
         return self._time
@@ -64,7 +79,7 @@ class TimelessEventLoop(SelectorEventLoop):
         ):
             # Remove delayed calls that were cancelled if their number
             # is too high
-            new_scheduled = []
+            new_scheduled: list[_TimerHandleProtocol] = []
             for handle in self._scheduled:
                 if handle._cancelled:
                     handle._scheduled = False
@@ -89,14 +104,14 @@ class TimelessEventLoop(SelectorEventLoop):
         end_time = self.time() + self._clock_resolution
         while self._scheduled:
             handle = self._scheduled[0]
-            if handle._when >= end_time:  # type: ignore[member-access]
+            if handle.when() >= end_time:
                 break
             handle = heapq.heappop(self._scheduled)
             handle._scheduled = False
             self._ready.append(handle)
 
         ntodo = len(self._ready)
-        for i in range(ntodo):
+        for _ in range(ntodo):
             handle = self._ready.popleft()
             if handle._cancelled:
                 continue
@@ -115,12 +130,12 @@ class TimelessEventLoop(SelectorEventLoop):
 
         if self._scheduled and not ntodo:
             # No ready callbacks this loop iteration; move time forward to next scheduled callback
-            next_time = next(hd._when for hd in self._scheduled)
+            next_time = next(hd.when() for hd in self._scheduled)
             logger.debug(
                 f"No further callbacks at t={self.time()};"
                 f"moving time forward to next callback time t={next_time}"
             )
-            self._time = next_time  # type: ignore[member-access]
+            self._time = next_time
 
         handle = None  # Needed to break cycles when an exception occurs.
 
@@ -128,65 +143,37 @@ class TimelessEventLoop(SelectorEventLoop):
 class TimelessEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
     def __init__(self) -> None:
         super().__init__()
-        self._loop: Optional[TimelessEventLoop] = None
+        self._loop: Optional[AbstractEventLoop] = None
 
-    def get_event_loop(self) -> TimelessEventLoop:
+    def get_event_loop(self) -> AbstractEventLoop:
         if not self._loop:
             self.set_event_loop(self.new_event_loop())
+        assert self._loop is not None
         return self._loop
 
-    def set_event_loop(self, loop: TimelessEventLoop) -> None:
+    def set_event_loop(self, loop: AbstractEventLoop | None) -> None:
         self._loop = loop
 
     def new_event_loop(self) -> TimelessEventLoop:
         return TimelessEventLoop()
 
 
-# @contextmanager
-# def timeless_event_loop_ctx() -> ContextManager[None]:
-#     """Context manager that sets up a timeless event loop policy for the duration of the context.
-#
-#     Usage:
-#
-#         with timeless_event_loop_ctx():
-#             asyncio.run(main())
-#     """
-#     previous_policy = asyncio.get_event_loop_policy()
-#     try:
-#         policy = TimelessEventLoopPolicy()
-#         asyncio.set_event_loop_policy(policy)
-#         yield
-#     finally:
-#         asyncio.set_event_loop_policy(previous_policy)
+@contextmanager
+def timeless_loop_ctx() -> typing.Iterator[None]:
+    """Context manager that sets up a timeless event loop policy for the duration of the context.
 
+    Usage:
 
-# Make the module usable directly as a context manager, i.e.
-# import timeless_loop
-# with timeless_loop:
-#     asyncio.run(main())
-
-
-# Define a new module type with __enter__ and __exit__ methods
-class _TimelessContext(types.ModuleType):
-    __all__ = (
-        "TimelessEventLoop",
-        "TimelessEventLoopPolicy",
-        "timeless_event_loop_ctx",
-    )
-
-    TimelessEventLoop = TimelessEventLoop
-    TimelessEventLoopPolicy = TimelessEventLoopPolicy
-
-    def __enter__(self):
-        self._previous_policy = asyncio.get_event_loop_policy()
+        with timeless_loop_ctx():
+            asyncio.run(main())
+    """
+    previous_policy = asyncio.get_event_loop_policy()
+    try:
         policy = TimelessEventLoopPolicy()
         asyncio.set_event_loop_policy(policy)
+        yield
+    finally:
+        asyncio.set_event_loop_policy(previous_policy)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        asyncio.set_event_loop_policy(self._previous_policy)
-        return False
 
-
-# Replace the current module entry in sys.modules with an instance of the new type
-sys.modules[__name__] = _TimelessContext(__name__)
-timeless_event_loop_ctx = _TimelessContext
+__all__ = ("TimelessEventLoop", "TimelessEventLoopPolicy", "timeless_loop_ctx")

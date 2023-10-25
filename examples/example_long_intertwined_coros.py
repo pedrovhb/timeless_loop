@@ -11,14 +11,14 @@ from __future__ import annotations
 import asyncio
 import time
 
-import timeless_loop
+from timeless_loop import timeless_loop_ctx
 
 
 async def example_long_intertwined_coros() -> tuple[float, float]:
     starting_time_loop = asyncio.get_event_loop().time()
     starting_time_wall = time.perf_counter()
 
-    async def _print_after_delay(value, delay):
+    async def _print_after_delay(value: str, delay: float) -> None:
         await asyncio.sleep(delay)
         print(f"Print after delay: {value}")
 
@@ -31,7 +31,7 @@ async def example_long_intertwined_coros() -> tuple[float, float]:
 
     await asyncio.gather(b, c, d)
     await asyncio.sleep(1000)
-    f = asyncio.create_task(_print_after_delay("  (Deep poetry by Github Copilot)", 8))
+    f = asyncio.create_task(_print_after_delay("    (Deep Poetry® by Github Copilot™)", 8))
     e = asyncio.create_task(_print_after_delay("Of never ending days", 4))
     await f
     await e
@@ -43,7 +43,7 @@ async def example_long_intertwined_coros() -> tuple[float, float]:
 
 
 if __name__ == "__main__":
-    with timeless_loop:
+    with timeless_loop_ctx():
         asyncio.run(example_long_intertwined_coros())
 
     # Results:

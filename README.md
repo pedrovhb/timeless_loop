@@ -2,7 +2,8 @@
 
 timeless_loop is a Python library that provides a custom asyncio event loop, allowing you to freeze time and avoid pesky delays while writing or testing async code.
 It does so by defining a subclass of the standard library `SelectorEventLoop`, which behaves nearly identically to the real one.
-It differs in that it does not actually wait for any time to pass; instead, it simply advances the loop's internal clock to the exact time of execution of the next scheduled callback when there are no immediately ready loop callbacks available. 
+It differs in that it does not actually wait for any time to pass; instead, it simply advances the loop's internal clock to the exact time of execution of the next scheduled callback when there are no immediately ready loop callbacks available.
+This allows you to run code that uses asyncio's `sleep` and `wait` functions without having to wait for the actual time to pass, without having to change any lines of code between the real and the fake time event loop.
 
 
 ## Installation
@@ -39,7 +40,6 @@ if __name__ == "__main__":
     
     with timeless_loop:
         asyncio.run(main())
-    
 
 ```
 
